@@ -1,1 +1,6 @@
-{ "api_key": "your_api_key_here" }
+{
+  "sentiment_model_path": "models/sentiment_model",
+  "dialect_model_path": "models/dialect_model.joblib",
+  "multilingual_model_path": "models/multilingual_model",
+  "api_key": "your_api_key_here"
+}

@@ -5,10 +5,12 @@ from typing import List, Optional, Dict, Any
 import time
 import torch
 import logging
+import os
+import json
 
 # وارد کردن کلاس‌های مدل
 from sentiment_model import MultilingualSentimentAnalyzer
-from dialect_detector import PersianDialectDetector, PersianTextPreprocessor
+from dialect_detector import PersianDialectDetector
 from multilingual_model import AdvancedMultilingualSentimentAnalyzer
 
 # تنظیم لاگینگ
@@ -73,6 +75,33 @@ sentiment_analyzer = None
 dialect_detector = None
 multilingual_analyzer = None
 
+def load_config():
+    """بارگذاری تنظیمات API"""
+    config_path = "api_config.json"
+    default_config = {
+        "sentiment_model_path": "models/sentiment_model",
+        "dialect_model_path": "models/dialect_model.joblib",
+        "multilingual_model_path": "models/multilingual_model"
+    }
+    
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                # ترکیب با تنظیمات پیش‌فرض
+                for key, value in default_config.items():
+                    if key not in config:
+                        config[key] = value
+                return config
+        except Exception as e:
+            logger.error(f"خطا در خواندن فایل تنظیمات: {e}")
+            return default_config
+    else:
+        # ایجاد فایل تنظیمات پیش‌فرض
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(default_config, f, ensure_ascii=False, indent=4)
+        return default_config
+
 @app.on_event("startup")
 async def startup_event():
     global sentiment_analyzer, dialect_detector, multilingual_analyzer
@@ -80,55 +109,51 @@ async def startup_event():
     logger.info("بارگذاری مدل‌ها...")
     
     try:
-        # بارگذاری تنظیمات API
-        import json
-        import os
+        # بارگذاری تنظیمات
+        config = load_config()
         
-        config_path = "api_config.json"
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        else:
-            config = {
-                "sentiment_model_path": "models/sentiment_model",
-                "dialect_model_path": "models/dialect_model",
-                "multilingual_model_path": "models/multilingual_model"
-            }
-            
         # بارگذاری مدل تشخیص احساسات فارسی
         sentiment_analyzer = MultilingualSentimentAnalyzer()
         
-        # تلاش برای بارگذاری مدل آموزش‌دیده، در صورت شکست بارگذاری مدل پیش‌فرض
         try:
-            sentiment_analyzer.load_trained_model(config["sentiment_model_path"])
-            logger.info("مدل آموزش‌دیده تشخیص احساسات فارسی با موفقیت بارگذاری شد.")
-        except:
-            logger.warning("مدل آموزش‌دیده تشخیص احساسات فارسی یافت نشد. بارگذاری مدل پیش‌فرض...")
+            if os.path.exists(config["sentiment_model_path"]):
+                sentiment_analyzer.load_trained_model(config["sentiment_model_path"])
+                logger.info("مدل آموزش‌دیده تشخیص احساسات فارسی با موفقیت بارگذاری شد.")
+            else:
+                logger.warning("مدل آموزش‌دیده تشخیص احساسات فارسی یافت نشد. بارگذاری مدل پیش‌فرض...")
+                sentiment_analyzer.load_tokenizer()
+                sentiment_analyzer.load_model()
+        except Exception as e:
+            logger.warning(f"خطا در بارگذاری مدل آموزش‌دیده: {e}")
             sentiment_analyzer.load_tokenizer()
             sentiment_analyzer.load_model()
         
         # بارگذاری مدل تشخیص لهجه فارسی
-        dialect_detector = PersianDialectDetector()
+        dialect_detector = PersianDialectDetector(model_path=config["dialect_model_path"])
         
-        # تلاش برای بارگذاری مدل آموزش‌دیده، در صورت شکست استفاده از روش مبتنی بر قاعده
         try:
-            dialect_detector.load_trained_model(config["dialect_model_path"])
-            logger.info("مدل آموزش‌دیده تشخیص لهجه با موفقیت بارگذاری شد.")
-        except:
-            logger.warning("مدل آموزش‌دیده تشخیص لهجه یافت نشد. استفاده از روش مبتنی بر قاعده.")
-            dialect_detector.load_tokenizer()
+            if not dialect_detector.load_model():
+                logger.warning("مدل آموزش‌دیده تشخیص لهجه یافت نشد. استفاده از روش مبتنی بر قاعده.")
+        except Exception as e:
+            logger.warning(f"خطا در بارگذاری مدل لهجه: {e}")
         
         # بارگذاری مدل چندزبانه
         multilingual_analyzer = AdvancedMultilingualSentimentAnalyzer()
         
-        # تلاش برای بارگذاری مدل آموزش‌دیده، در صورت شکست بارگذاری مدل پیش‌فرض
         try:
-            multilingual_analyzer.load_trained_model(config["multilingual_model_path"])
-            logger.info("مدل آموزش‌دیده تشخیص احساسات چندزبانه با موفقیت بارگذاری شد.")
-        except:
-            logger.warning("مدل آموزش‌دیده تشخیص احساسات چندزبانه یافت نشد. بارگذاری مدل پیش‌فرض...")
+            if os.path.exists(config["multilingual_model_path"]):
+                multilingual_analyzer.load_trained_model(config["multilingual_model_path"])
+                logger.info("مدل آموزش‌دیده تشخیص احساسات چندزبانه با موفقیت بارگذاری شد.")
+            else:
+                logger.warning("مدل آموزش‌دیده تشخیص احساسات چندزبانه یافت نشد. بارگذاری مدل پیش‌فرض...")
+                multilingual_analyzer.load_tokenizer()
+                multilingual_analyzer.load_model()
+        except Exception as e:
+            logger.warning(f"خطا در بارگذاری مدل چندزبانه: {e}")
             multilingual_analyzer.load_tokenizer()
             multilingual_analyzer.load_model()
+        
+        logger.info("همه مدل‌ها با موفقیت بارگذاری شدند.")
     
     except Exception as e:
         logger.error(f"خطا در بارگذاری مدل‌ها: {str(e)}")
@@ -204,18 +229,16 @@ async def analyze_dialect(input_data: TextInput):
     
     try:
         # تشخیص لهجه
-        if hasattr(dialect_detector, 'model') and dialect_detector.model is not None:
-            # استفاده از مدل آموزش‌دیده
-            prediction = dialect_detector.predict(input_data.text)
-            dialect_label = prediction["labels"][0]
-            dialect_name = prediction["dialect_names"][0]
+        prediction = dialect_detector.predict_dialect(input_data.text)
+        
+        dialect_label = prediction["labels"][0]
+        dialect_name = prediction["dialect_names"][0]
+        
+        # محاسبه امتیاز اطمینان
+        if len(prediction["probabilities"][0]) > dialect_label:
             confidence_score = float(prediction["probabilities"][0][dialect_label])
         else:
-            # استفاده از روش مبتنی بر قاعده
-            prediction = dialect_detector.get_rule_based_prediction(input_data.text)
-            dialect_label = prediction["label"]
-            dialect_name = prediction["dialect_name"]
-            confidence_score = float(prediction["confidence"])
+            confidence_score = float(prediction["probabilities"][0][0])
         
         # زمان پردازش
         processing_time = time.time() - start_time
@@ -239,95 +262,4 @@ async def analyze_text(input_data: TextInput):
         raise HTTPException(status_code=400, detail="متن ورودی خالی است")
     
     try:
-        # انتخاب آنالایزر مناسب بر اساس زبان
-        if input_data.language == "fa":
-            analyzer = sentiment_analyzer
-        else:
-            analyzer = multilingual_analyzer
-            
-        # تشخیص احساس
-        sentiment_prediction = analyzer.predict(input_data.text)
-        sentiment_label = sentiment_prediction["labels"][0]
-        
-        if input_data.language == "fa":
-            sentiment_names = {0: "منفی", 1: "خنثی", 2: "مثبت"}
-        else:
-            lang = input_data.language
-            sentiment_names = multilingual_analyzer.sentiment_labels.get(lang, multilingual_analyzer.sentiment_labels["en"])
-            
-        sentiment_name = sentiment_names.get(sentiment_label, "نامشخص")
-        sentiment_score = float(sentiment_prediction["probabilities"][0][sentiment_label])
-        
-        response_data = {
-            "text": input_data.text,
-            "sentiment": sentiment_name,
-            "sentiment_score": sentiment_score
-        }
-        
-        # تشخیص لهجه (فقط برای فارسی)
-        if input_data.language == "fa":
-            if hasattr(dialect_detector, 'model') and dialect_detector.model is not None:
-                # استفاده از مدل آموزش‌دیده
-                dialect_prediction = dialect_detector.predict(input_data.text)
-                dialect_label = dialect_prediction["labels"][0]
-                dialect_name = dialect_prediction["dialect_names"][0]
-                dialect_score = float(dialect_prediction["probabilities"][0][dialect_label])
-            else:
-                # استفاده از روش مبتنی بر قاعده
-                dialect_prediction = dialect_detector.get_rule_based_prediction(input_data.text)
-                dialect_name = dialect_prediction["dialect_name"]
-                dialect_score = float(dialect_prediction["confidence"])
-                
-            response_data["dialect"] = dialect_name
-            response_data["dialect_score"] = dialect_score
-        
-        # زمان پردازش
-        processing_time = time.time() - start_time
-        response_data["processing_time"] = processing_time
-        
-        return CombinedResponse(**response_data)
-    
-    except Exception as e:
-        logger.error(f"خطا در تحلیل متن: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"خطا در تحلیل متن: {str(e)}")
-
-@app.post("/batch")
-async def batch_analyze(input_data: BatchTextInput):
-    if not input_data.texts:
-        raise HTTPException(status_code=400, detail="لیست متن‌های ورودی خالی است")
-    
-    results = []
-    start_time = time.time()
-    
-    try:
-        for text in input_data.texts:
-            single_input = TextInput(text=text, language=input_data.language)
-            result = await analyze_text(single_input)
-            results.append(result)
-        
-        total_processing_time = time.time() - start_time
-        
-        return {
-            "results": results,
-            "total_texts": len(results),
-            "total_processing_time": total_processing_time
-        }
-    
-    except Exception as e:
-        logger.error(f"خطا در پردازش گروهی: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"خطا در پردازش گروهی: {str(e)}")
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    
-    logger.info(f"مسیر: {request.url.path} - زمان: {process_time:.4f}s - وضعیت: {response.status_code}")
-    
-    return response
-
-# اجرای برنامه با uvicorn
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("sentiment_api:app", host="0.0.0.0", port=8000, reload=True)
+        # انتخاب آنالایزر مناس
